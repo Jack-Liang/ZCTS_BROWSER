@@ -10,6 +10,7 @@ CLASS lcl_toc DEFINITION.
       IMPORTING is_scr TYPE ts_screen.
 
     METHODS sh
+      RETURNING VALUE(rv_result) TYPE string
       RAISING zcx_cts002_data_error.
 
   PROTECTED SECTION.
@@ -32,6 +33,7 @@ CLASS lcl_toc DEFINITION.
       RAISING zcx_cts002_data_error.
 
     METHODS do_toc_n_send
+      RETURNING VALUE(rv_result) TYPE string
       RAISING zcx_cts002_data_error.
 
     METHODS fill_e070
@@ -39,7 +41,8 @@ CLASS lcl_toc DEFINITION.
 
 
     METHODS create_copy
-      IMPORTING it_e070 TYPE e070_t.
+      IMPORTING it_e070 TYPE e070_t
+      RETURNING VALUE(rv_result) TYPE string.
 
     METHODS get_text4copy_req
       IMPORTING it_e070       TYPE e070_t
@@ -55,12 +58,18 @@ CLASS lcl_toc DEFINITION.
       IMPORTING iv_req_id TYPE trkorr.
 
     METHODS transport_request
-      IMPORTING iv_req_id TYPE trkorr.
+      IMPORTING iv_req_id TYPE trkorr
+      RETURNING VALUE(rv_result) TYPE string.
 
     METHODS transport_via_tms
-      IMPORTING is_e070 TYPE e070.
+      IMPORTING is_e070 TYPE e070
+      RETURNING VALUE(rv_result) TYPE string.
 
     METHODS tms_in_remote_sys
+      IMPORTING is_e070 TYPE e070
+      RETURNING VALUE(rv_result) TYPE string.
+
+    METHODS transfer_files
       IMPORTING is_e070 TYPE e070.
 
 ENDCLASS.
@@ -75,7 +84,7 @@ CLASS lcl_toc IMPLEMENTATION.
 
     fill_target_sys_info( ).
 
-    do_toc_n_send( ).
+    rv_result = do_toc_n_send( ).
 
   ENDMETHOD.
 
@@ -123,11 +132,11 @@ CLASS lcl_toc IMPLEMENTATION.
       fill_e070( CHANGING ct_e070 = lt_e070 ).
 
       IF lt_e070 IS NOT INITIAL.
-        create_copy( lt_e070 ).
+        rv_result = create_copy( lt_e070 ).
       ELSE.
         RAISE EXCEPTION TYPE zcx_cts002_data_error
           EXPORTING
-            descr = |No requests cou;d be transported |.
+            descr = |No requests could be transported |.
       ENDIF.
 
     ENDIF.
@@ -178,13 +187,21 @@ CLASS lcl_toc IMPLEMENTATION.
         es_msg          = ls_msg
         ev_exception    = lv_exception.     " Name of exception
 
+    IF lv_exception IS NOT INITIAL OR lv_req_id IS INITIAL.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |Create TOC request failed: { lv_exception } { ls_msg }|.
+    ENDIF.
+
     put_objects2request( EXPORTING it_e070 = it_e070
                                    iv_req_id = lv_req_id ).
 
     release_request( lv_req_id ).
 
     IF ms_scr->toctrans EQ abap_true.
-      transport_request( lv_req_id ).
+      rv_result = |{ lv_req_id }: { transport_request( lv_req_id ) }|.
+    ELSE.
+      rv_result = |{ lv_req_id }: released, import skipped (checkbox off)|.
     ENDIF.
 
   ENDMETHOD.
@@ -229,6 +246,8 @@ CLASS lcl_toc IMPLEMENTATION.
     DATA lt_e071 TYPE STANDARD TABLE OF e071.
     DATA lt_objects TYPE STANDARD TABLE OF trexreqob.
     DATA ls_objects TYPE trexreqob.
+    DATA lv_err_msg TYPE string.
+    DATA lv_err_count TYPE i.
     FIELD-SYMBOLS <fs_e071> TYPE e071.
 **
     SELECT trkorr as4pos FROM e071
@@ -262,11 +281,19 @@ CLASS lcl_toc IMPLEMENTATION.
           object_not_patchable     = 11
           OTHERS                   = 12.
       IF sy-subrc <> 0.
-*   MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
-*              WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+        lv_err_count = lv_err_count + 1.
+        MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+                   WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4
+                   INTO lv_err_msg.
       ENDIF.
 
     ENDLOOP.
+
+    IF lv_err_count > 0.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |{ lv_err_count } TR_COPY_COMM error(s). Last: { lv_err_msg }|.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -280,6 +307,8 @@ CLASS lcl_toc IMPLEMENTATION.
     DATA lv_display_export_log TYPE char1.
     DATA lt_messages               TYPE ctsgerrmsgs.
     DATA ls_message                TYPE ctsgerrmsg.
+    DATA lv_rel_err TYPE string.
+    DATA lv_rel_msg TYPE string.
 
 *"     REFERENCE(ES_REQUEST) TYPE  TRWBO_REQUEST
 *"     REFERENCE(ET_DELETED_TASKS) TYPE  TRWBO_T_E070
@@ -336,7 +365,24 @@ CLASS lcl_toc IMPLEMENTATION.
         error_in_export_methods     = 16
         object_lang_error           = 17.
 
-    "lv_subrc = sy-subrc.
+    IF sy-subrc <> 0.
+      lv_rel_err = |rc={ sy-subrc }|.
+      READ TABLE lt_messages INTO ls_message INDEX 1.
+      IF sy-subrc = 0.
+        MESSAGE ID ls_message-msgid TYPE 'S' NUMBER ls_message-msgno
+          WITH ls_message-msgv1 ls_message-msgv2 ls_message-msgv3 ls_message-msgv4
+          INTO lv_rel_msg.
+        lv_rel_err = lv_rel_err && | { lv_rel_msg }|.
+      ENDIF.
+      CALL FUNCTION 'CTS_UNLOCK_TRKORR'
+        EXPORTING
+          iv_trkorr = iv_req_id
+        EXCEPTIONS
+          OTHERS    = 0.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |Release { iv_req_id } failed: { lv_rel_err }|.
+    ENDIF.
 
 *---dequeue request-----------------------------------------------------
     CALL FUNCTION 'CTS_UNLOCK_TRKORR'
@@ -351,44 +397,51 @@ CLASS lcl_toc IMPLEMENTATION.
   METHOD transport_request.
     "      IMPORTING iv_req_id TYPE trkorr.
 
-    DATA lt_e070 TYPE STANDARD TABLE OF e070.
-    DATA ls_e070 TYPE e070.
-    DATA lv_request_release TYPE char1.
-    FIELD-SYMBOLS <fs_e070> TYPE e070.
+    CONSTANTS lc_timeout TYPE i VALUE 300.  " seconds
 
-    WHILE lv_request_release EQ abap_false.
-      SELECT * FROM e070
-        INTO TABLE lt_e070
+    DATA ls_e070 TYPE e070.
+    DATA lv_waited TYPE i.
+
+    " TRINT_RELEASE_REQUEST already returned; this polling is belt-and-braces.
+    " The timeout guard prevents an endless hang when a release stalls.
+    WHILE lv_waited < lc_timeout.
+      SELECT SINGLE * FROM e070
+        INTO ls_e070
         WHERE trkorr  = iv_req_id
           AND trstatus = mc_trstatus-released.
       IF sy-subrc EQ 0.
-        lv_request_release = abap_true.
-      ELSE.
-        lv_request_release = abap_false.
+        rv_result = transport_via_tms( EXPORTING is_e070 = ls_e070 ).
+        RETURN.
       ENDIF.
+      ADD 1 TO lv_waited.
       WAIT UP TO 1 SECONDS.
     ENDWHILE.
 
-    LOOP AT lt_e070 ASSIGNING <fs_e070>.
-      transport_via_tms( EXPORTING is_e070 = <fs_e070> ).
-    ENDLOOP.
+    RAISE EXCEPTION TYPE zcx_cts002_data_error
+      EXPORTING
+        descr = |Request { iv_req_id } not released within { lc_timeout } seconds - remote import skipped|.
   ENDMETHOD.
 
   METHOD transport_via_tms.
     "       IMPORTING is_e070 TYPE e070.
 
-    tms_in_remote_sys( is_e070 = is_e070 ).
+    rv_result = tms_in_remote_sys( is_e070 = is_e070 ).
 
   ENDMETHOD.
 
   METHOD  tms_in_remote_sys.
     DATA lv_system_name TYPE  stpa-sysname.
 
-    DATA lv_tp_ret_code TYPE trretcode.
-    DATA lt_trreq TYPE STANDARD TABLE OF tprequest.
+    DATA lv_rfc_error TYPE string.
+    DATA lv_rfc_msg TYPE c LENGTH 200.
 
     "    lv_system_name = sy-sysid(3).
     lv_system_name = ms_target_sys-target_sys.
+
+    " push cofile + datafile to the target system first
+    " (the two trans dirs are NOT shared across the domains)
+    transfer_files( is_e070 = is_e070 ).
+
     CALL FUNCTION 'Z_CTS002_TMS_TP_IMPORT'
       DESTINATION ms_target_sys-rfcdest
       EXPORTING
@@ -396,28 +449,107 @@ CLASS lcl_toc IMPLEMENTATION.
         iv_request     = is_e070-trkorr
         iv_vers_ignore = vers_ign
       IMPORTING
-*       EV_TP_CMD_STRG =
-        ev_tp_ret_code = lv_tp_ret_code
-*       EV_TP_MESSAGE  =
-*       EV_TP_VERSION  =
-*       EV_TP_ALOG     =
-*       EV_TP_SLOG     =
-*       EV_TP_PID      =
-*       EV_TPSTAT_KEY  =
-      TABLES
-        tt_request     = lt_trreq
-*       TT_PROJECT     =
-*       TT_CLIENT      =
-*       TT_STDOUT      =
-*       TT_LOGPTR      =
-      .
+        ev_error       = lv_rfc_error
+      EXCEPTIONS
+        system_failure         = 1 MESSAGE lv_rfc_msg
+        communication_failure  = 2 MESSAGE lv_rfc_msg
+        OTHERS                 = 3.
 
-    DATA lt_reqs TYPE tprequests.
-    DATA ls_reqs TYPE tprequest.
+    IF sy-subrc <> 0 OR lv_rfc_error IS NOT INITIAL.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |Import of { is_e070-trkorr } into { lv_system_name } failed: { lv_rfc_error } { lv_rfc_msg }|.
+    ENDIF.
 
-    ls_reqs-trkorr = is_e070-trkorr.
-    APPEND ls_reqs TO lt_reqs.
+    rv_result = |import to { lv_system_name } OK (tp rc<=0004)|.
 
+  ENDMETHOD.
+
+  METHOD transfer_files.
+    " Copy the released request's cofile + datafile to the target
+    " system via RFC (the trans directories are not shared).
+    DATA lv_dir TYPE c LENGTH 60.
+    DATA lv_base TYPE c LENGTH 40.
+    DATA lv_subdir TYPE c LENGTH 10.
+    DATA lv_full TYPE string.
+    DATA lt_data TYPE solix_tab.
+    DATA ls_x TYPE solix.
+    DATA lv_err TYPE string.
+    DATA lv_bytes TYPE i.
+    DATA lv_msg TYPE c LENGTH 100.
+    DATA lv_rfcmsg TYPE c LENGTH 200.
+    DATA lv_total TYPE i.
+    DATA lv_data TYPE xstring.
+    DATA lv_off TYPE i.
+    DATA lv_len TYPE i.
+
+    CALL 'C_SAPGPARAM' ID 'NAME' FIELD 'DIR_TRANS'
+      ID 'VALUE' FIELD lv_dir.
+
+    DO 2 TIMES.
+      CASE sy-index.
+        WHEN 1.
+          lv_subdir = 'cofiles'.
+          CONCATENATE 'K' is_e070-trkorr+4(6) '.' sy-sysid
+            INTO lv_base.
+        WHEN 2.
+          lv_subdir = 'data'.
+          CONCATENATE 'R' is_e070-trkorr+4(6) '.' sy-sysid
+            INTO lv_base.
+      ENDCASE.
+
+      CONCATENATE lv_dir lv_subdir lv_base INTO lv_full
+        SEPARATED BY '/'.
+
+      CLEAR: lt_data, lv_err, lv_bytes, lv_rfcmsg.
+
+      OPEN DATASET lv_full FOR INPUT IN BINARY MODE
+        MESSAGE lv_msg.
+      IF sy-subrc <> 0.
+        RAISE EXCEPTION TYPE zcx_cts002_data_error
+          EXPORTING
+            descr = |{ lv_base } open failed on { sy-sysid }: { lv_msg }|.
+      ENDIF.
+
+      " Read the WHOLE file in one call (ZUD pattern). Chunked reads
+      " with READ DATASET drop the final partial chunk: at end-of-file
+      " sy-subrc returns 4 even when data was read.
+      CLEAR: lv_total, lv_data.
+      READ DATASET lv_full INTO lv_data.
+      CLOSE DATASET lv_full.
+      lv_total = xstrlen( lv_data ).
+      CLEAR lv_off.
+      WHILE lv_off < lv_total.
+        lv_len = lv_total - lv_off.
+        IF lv_len > 255.
+          lv_len = 255.
+        ENDIF.
+        CLEAR ls_x.
+        ls_x-line = lv_data+lv_off(lv_len).
+        APPEND ls_x TO lt_data.
+        lv_off = lv_off + lv_len.
+      ENDWHILE.
+
+      CALL FUNCTION 'Z_CTS002_FILE_UPLOAD'
+        DESTINATION ms_target_sys-rfcdest
+        EXPORTING
+          iv_filename = lv_base
+          iv_subdir   = lv_subdir
+          iv_total_len = lv_total
+          it_data     = lt_data
+        IMPORTING
+          ev_error    = lv_err
+          ev_bytes    = lv_bytes
+        EXCEPTIONS
+          system_failure        = 1 MESSAGE lv_rfcmsg
+          communication_failure = 2 MESSAGE lv_rfcmsg
+          OTHERS                = 3.
+      IF sy-subrc <> 0 OR lv_err IS NOT INITIAL.
+        RAISE EXCEPTION TYPE zcx_cts002_data_error
+          EXPORTING
+            descr = |Upload { lv_base } failed: { lv_err } { lv_rfcmsg }|.
+      ENDIF.
+    ENDDO.
   ENDMETHOD.
 
 ENDCLASS.

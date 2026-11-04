@@ -9,9 +9,72 @@
    </INCLUDES>
    <FUNCTIONS>
     <item>
+     <FUNCNAME>Z_AGENT_ACT99</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
+     <SHORT_TEXT>agent: activate working-set objects</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IV_OBJECT1</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>DWINACTIV-OBJECT</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_NAME1</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>DWINACTIV-OBJ_NAME</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_OBJECT2</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>DWINACTIV-OBJECT</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_NAME2</PARAMETER>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>DWINACTIV-OBJ_NAME</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>EV_ERROR</PARAMETER>
+       <TYP>STRING</TYP>
+      </RSEXP>
+      <RSEXP>
+       <PARAMETER>EV_SUBRC</PARAMETER>
+       <TYP>I</TYP>
+      </RSEXP>
+     </EXPORT>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>IV_OBJECT1</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_NAME1</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_OBJECT2</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_NAME2</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_ERROR</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_SUBRC</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+     </DOCUMENTATION>
+    </item>
+    <item>
      <FUNCNAME>Z_CTS002_TMS_TP_IMPORT</FUNCNAME>
      <REMOTE_CALL>R</REMOTE_CALL>
-     <SHORT_TEXT>TMS_TP_IMPORT (with remote)</SHORT_TEXT>
+     <SHORT_TEXT>CTS002: import transport request in target system</SHORT_TEXT>
      <IMPORT>
       <RSIMP>
        <PARAMETER>IV_SYSTEM_NAME</PARAMETER>
@@ -33,6 +96,12 @@
        <OPTIONAL>X</OPTIONAL>
        <TYP>INT1</TYP>
       </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_OPTIONS</PARAMETER>
+       <DEFAULT>&apos;XXX--X&apos;</DEFAULT>
+       <OPTIONAL>X</OPTIONAL>
+       <TYP>CHAR8</TYP>
+      </RSIMP>
      </IMPORT>
      <EXPORT>
       <RSEXP>
@@ -44,22 +113,22 @@
       <RSFDO>
        <PARAMETER>IV_SYSTEM_NAME</PARAMETER>
        <KIND>P</KIND>
-       <STEXT>Name of an SAP System in the (active) transp. configuration</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_REQUEST</PARAMETER>
        <KIND>P</KIND>
-       <STEXT>Request/Task</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_VERS_IGNORE</PARAMETER>
        <KIND>P</KIND>
-       <STEXT>Flag ( &apos;X&apos; or &apos; &apos; )</STEXT>
       </RSFDO>
       <RSFDO>
        <PARAMETER>IV_IMPORT_MODE</PARAMETER>
        <KIND>P</KIND>
-       <STEXT>1 - direct; 2-with check data files</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_OPTIONS</PARAMETER>
+       <KIND>P</KIND>
       </RSFDO>
       <RSFDO>
        <PARAMETER>EV_ERROR</PARAMETER>

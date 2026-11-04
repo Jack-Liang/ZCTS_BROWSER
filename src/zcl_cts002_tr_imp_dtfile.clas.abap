@@ -7,7 +7,8 @@ CLASS zcl_cts002_tr_imp_dtfile DEFINITION
     METHODS constructor
       IMPORTING iv_system_name TYPE stpa-sysname
                 iv_request     TYPE  stpa-trkorr
-                iv_vers_ignore TYPE  trparflag DEFAULT 'Y'.
+                iv_vers_ignore TYPE  trparflag DEFAULT 'Y'
+                iv_options     TYPE char8 OPTIONAL.
     METHODS sh
       RAISING zcx_cts002_data_error.
   PROTECTED SECTION.
@@ -16,6 +17,7 @@ CLASS zcl_cts002_tr_imp_dtfile DEFINITION
     DATA mv_system_name TYPE sysysid.
     DATA mv_request TYPE  stpa-trkorr.
     DATA mv_vers_ignore TYPE  trparflag.
+    DATA ms_options TYPE char8.
 
     METHODS check_n_import_data_file
       RAISING zcx_cts002_data_error.
@@ -35,6 +37,9 @@ CLASS zcl_cts002_tr_imp_dtfile DEFINITION
     METHODS import_data_files
       IMPORTING it_tmsbuff TYPE tmsbuffers
       RAISING   zcx_cts002_data_error.
+
+    METHODS ensure_in_buffer
+      RAISING zcx_cts002_data_error.
 ENDCLASS.
 
 
@@ -53,6 +58,10 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
     mv_system_name = iv_system_name.
     mv_request = iv_request.
     mv_vers_ignore = iv_vers_ignore.
+    ms_options = iv_options.
+    IF ms_options IS INITIAL.
+      ms_options = 'XXX--X'.
+    ENDIF.
   ENDMETHOD.
 
 
@@ -62,6 +71,8 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
 * | [!CX!] ZCX_CTS002_DATA_ERROR
 * +--------------------------------------------------------------------------------------</SIGNATURE>
   METHOD sh.
+
+    ensure_in_buffer( ).
 
     check_n_import_data_file( ).
 
@@ -256,6 +267,27 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
   METHOD import_tr.
 
     DATA lv_error TYPE string.
+    DATA lv_korrdev TYPE e070-korrdev.
+
+    " Mirror STMS/ZUD: fill client-specific entries for Customizing
+    " requests so the import targets the right client (non-fatal).
+    SELECT SINGLE korrdev FROM e070 INTO lv_korrdev
+      WHERE trkorr = mv_request.
+    IF sy-subrc = 0 AND lv_korrdev = 'CUST'.
+      CALL FUNCTION 'TMS_MGR_MAINTAIN_TR_QUEUE'
+        EXPORTING
+          iv_command                 = 'FILLCLIENT'
+          iv_system                  = sy-sysid
+          iv_request                 = mv_request
+          iv_tarcli                  = sy-mandt
+        EXCEPTIONS
+          read_config_failed         = 1
+          table_of_requests_is_empty = 2
+          OTHERS                     = 3.
+    ENDIF.
+    DATA lv_tp_ret TYPE stpa-retcode.
+    DATA lt_stdout TYPE STANDARD TABLE OF tpstdout.
+    DATA ls_stdout TYPE tpstdout.
     DATA lt_request_in TYPE tmsbuffers.
     DATA lt_request_out TYPE stms_wbo_requests.
 
@@ -272,15 +304,16 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
         iv_request                 = mv_request
         iv_client                  = sy-mandt
 *       iv_ctc_active              =
-*       iv_overtake                =
-*       iv_import_again            =
-*       iv_ignore_originality      =
-*       iv_ignore_repairs          =
-*       iv_ignore_transtype        =
-*       iv_ignore_tabletype        =
+        iv_overtake                = 'X'
+        iv_import_again            = ms_options+0(1)
+        iv_ignore_originality      = ms_options+1(1)
+        iv_ignore_repairs          = ms_options+2(1)
+        iv_ignore_transtype        = ms_options+3(1)
+        iv_ignore_tabletype        = ms_options+4(1)
 *       iv_ignore_qaflag           =
-*       iv_ignore_predec           =
+        iv_ignore_predec           = ms_options+5(1)
         iv_ignore_cvers            = mv_vers_ignore
+        iv_monitor                 = 'X'
 *       iv_ignore_spam             =
 *       iv_test_import             =
 *       iv_cmd_import              =
@@ -304,7 +337,8 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
 *       et_tp_imports              =
 *      TABLES
 *       tt_logptr                  =
-*       tt_stdout                  =
+      TABLES
+        tt_stdout                  = lt_stdout
       EXCEPTIONS
         read_config_failed         = 1
         table_of_requests_is_empty = 2
@@ -319,6 +353,20 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
 *         previous =
           descr = | { lv_error } |.
 
+    ENDIF.
+
+    IF lv_tp_ret > '0004'.
+      DATA lv_out TYPE c LENGTH 160.
+      LOOP AT lt_stdout INTO ls_stdout.
+        CLEAR lv_out.
+        lv_out = ls_stdout.
+        IF lv_out IS NOT INITIAL.
+          EXIT.
+        ENDIF.
+      ENDLOOP.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |Import { mv_request } failed, tp rc={ lv_tp_ret }: { lv_out }|.
     ENDIF.
 
 
@@ -350,6 +398,69 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
 *          descr = | { lv_error } |.
 *
 *    ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD ensure_in_buffer.
+
+    DATA lt_tmsbuffer TYPE tmsbuffers.
+    DATA lv_err       TYPE string.
+    DATA lv_sysnam    TYPE tmssysnam.
+    DATA lv_retcode   TYPE stpa-retcode.
+    DATA ls_alert     TYPE stmscalert.
+
+    read_tms_buffer( IMPORTING et_tmsbuff = lt_tmsbuffer ).
+
+    IF lt_tmsbuffer IS NOT INITIAL.
+      RETURN. " request already sits in the import queue of this system
+    ENDIF.
+
+    " refresh local TMS queue cache first - may register the request itself
+    TRY .
+        read_trans_queue( ).
+      CATCH zcx_cts002_data_error.
+        " queue refresh failed - continue with ADDTOBUFFER anyway
+    ENDTRY.
+
+    read_tms_buffer( IMPORTING et_tmsbuff = lt_tmsbuffer ).
+
+    IF lt_tmsbuffer IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_sysnam = sy-sysid.
+
+    CALL FUNCTION 'TMS_MGR_MAINTAIN_TR_QUEUE'
+      EXPORTING
+        iv_command                 = 'ADDTOBUFFER'
+        iv_system                  = lv_sysnam
+        iv_request                 = mv_request
+        iv_tarcli                  = sy-mandt
+        iv_monitor                 = 'X'
+      IMPORTING
+        ev_tp_ret_code             = lv_retcode
+        es_exception               = ls_alert
+      EXCEPTIONS
+        read_config_failed         = 1
+        table_of_requests_is_empty = 2
+        OTHERS                     = 3.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_err.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |ADDTOBUFFER { mv_request } failed: { lv_err }|.
+    ENDIF.
+
+    IF lv_retcode > '0004'.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |ADDTOBUFFER { mv_request } failed (rc={ lv_retcode }): { ls_alert-text }|.
+    ENDIF.
+
+    " note: do NOT verify via the TMSBUFFER table here - the DB cache
+    " lags behind the physical buffer file. tp rc is authoritative.
 
   ENDMETHOD.
 ENDCLASS.

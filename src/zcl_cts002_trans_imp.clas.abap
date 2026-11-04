@@ -17,6 +17,8 @@ CLASS zcl_cts002_trans_imp DEFINITION
     DATA mv_request TYPE  stpa-trkorr.
     DATA mv_vers_ignore TYPE  trparflag.
 
+    METHODS ensure_in_buffer
+      RAISING zcx_cts002_data_error.
 ENDCLASS.
 
 
@@ -29,6 +31,8 @@ CLASS zcl_cts002_trans_imp IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD sh.
+
+    ensure_in_buffer( ).
 
     DATA lv_symandt TYPE symandt.
 
@@ -56,14 +60,14 @@ CLASS zcl_cts002_trans_imp IMPLEMENTATION.
 
     CALL FUNCTION 'TMS_TP_IMPORT'
       EXPORTING
-        iv_system_name     = mv_system_name
+        iv_system_name     = sy-sysid
         iv_request         = mv_request
         iv_client          = lv_symandt
 *       IV_CTC_UI          =
 *       IV_CTC_ACTIVE      =
 *       IV_UMODES          =
 *       IV_TP_OPTIONS      =
-*       IV_IGN_PREDEC      =
+        iv_ign_predec      = 'X'
         iv_ign_cvers       = mv_vers_ignore
         iv_ign_rc152       = lv_rc152
 *       IV_OFFLINE         =
@@ -114,6 +118,63 @@ CLASS zcl_cts002_trans_imp IMPLEMENTATION.
       .
     ENDIF.
 
+    IF lv_tp_ret_code > '0004'.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |Import { mv_request } failed, tp rc={ lv_tp_ret_code } { lv_tp_message } - see STMS log|.
+    ENDIF.
+
+
+  ENDMETHOD.
+
+
+  METHOD ensure_in_buffer.
+
+    DATA lt_tmsbuffer TYPE tmsbuffers.
+    DATA lv_err       TYPE string.
+    DATA lv_sysnam    TYPE tmssysnam.
+    DATA lv_retcode   TYPE stpa-retcode.
+    DATA ls_alert     TYPE stmscalert.
+
+    SELECT domnam sysnam bufpos buflvl trkorr umodes impflg maxrc
+        tarcli project trfunc actflg preflg nodataflg
+      FROM tmsbuffer
+      INTO CORRESPONDING FIELDS OF TABLE lt_tmsbuffer
+      WHERE trkorr = mv_request.
+
+    IF lt_tmsbuffer IS NOT INITIAL.
+      RETURN. " request already sits in the import queue of this system
+    ENDIF.
+
+    lv_sysnam = sy-sysid.
+
+    CALL FUNCTION 'TMS_MGR_MAINTAIN_TR_QUEUE'
+      EXPORTING
+        iv_command                 = 'ADDTOBUFFER'
+        iv_system                  = lv_sysnam
+        iv_request                 = mv_request
+        iv_tarcli                  = sy-mandt
+        iv_monitor                 = 'X'
+      IMPORTING
+        ev_tp_ret_code             = lv_retcode
+        es_exception               = ls_alert
+      EXCEPTIONS
+        read_config_failed         = 1
+        table_of_requests_is_empty = 2
+        OTHERS                     = 3.
+    IF sy-subrc <> 0.
+      MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+        WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4 INTO lv_err.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |ADDTOBUFFER { mv_request } failed: { lv_err }|.
+    ENDIF.
+
+    IF lv_retcode > '0004'.
+      RAISE EXCEPTION TYPE zcx_cts002_data_error
+        EXPORTING
+          descr = |ADDTOBUFFER { mv_request } failed (rc={ lv_retcode }): { ls_alert-text }|.
+    ENDIF.
 
   ENDMETHOD.
 ENDCLASS.
