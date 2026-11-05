@@ -11,6 +11,8 @@ CLASS zcl_cts002_tr_imp_dtfile DEFINITION
                 iv_options     TYPE char8 OPTIONAL.
     METHODS sh
       RAISING zcx_cts002_data_error.
+    METHODS buffer_only
+      RAISING zcx_cts002_data_error.
   PROTECTED SECTION.
   PRIVATE SECTION.
 
@@ -78,6 +80,12 @@ CLASS ZCL_CTS002_TR_IMP_DTFILE IMPLEMENTATION.
 
     import_tr(  ).
 
+  ENDMETHOD.
+
+  METHOD buffer_only.
+    " Mode 3: register the request in the local import queue only
+    " (STMS 'Other Requests -> Add'). No import is performed.
+    ensure_in_buffer( ).
   ENDMETHOD.
 
 

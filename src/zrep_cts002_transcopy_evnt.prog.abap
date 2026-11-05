@@ -4,6 +4,7 @@
 
 INITIALIZATION.
   lo_app = new #( ).
+  lo_app->default_dest( ).
   lo_app->init_texts( ).
 
 at SELECTION-SCREEN.

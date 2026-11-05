@@ -7,6 +7,7 @@ CLASS lcl_app DEFINITION.
   PUBLIC SECTION.
     METHODS constructor.
     METHODS init_texts.
+    METHODS default_dest.
     METHODS start_of_sel.
     METHODS at_sel_screen.
     METHODS at_sel_screen_output.
@@ -27,7 +28,18 @@ CLASS lcl_app IMPLEMENTATION.
     fill_toolbar_func1( ).
   ENDMETHOD.
 
+  METHOD default_dest.
+    " prefill target system from DestSys config (IS_DEFAULT row)
+    SELECT SINGLE rfcdest FROM ztcts002_destsys
+      INTO rfcdest
+      WHERE is_default = 'X'
+        AND del_mark = ''.
+  ENDMETHOD.
+
   METHOD init_texts.
+    %_p_copy_%_app_%-text = '副本模式(新建TOC)'.
+    %_p_orig_%_app_%-text = '本体模式(直接传输)'.
+    %_toctrans_%_app_%-text = '导入到目标系统(不勾=仅推送文件并加入STMS缓冲)'.
     %_p_impagn_%_app_%-text = '再次导入传输请求'.
     %_p_orgovr_%_app_%-text = '覆盖原件'.
     %_p_repovr_%_app_%-text = '覆盖未确认修复中的对象'.
@@ -74,6 +86,7 @@ CLASS lcl_app IMPLEMENTATION.
     ms_scr-rfcdest = rfcdest.
     ms_scr-version_ignore = vers_ign.
     ms_scr-toctrans = toctrans.
+    ms_scr-orig_mode = p_orig.
     ms_scr-imp_again = p_impagn.
     ms_scr-ign_orig = p_orgovr.
     ms_scr-ign_repair = p_repovr.
@@ -99,6 +112,16 @@ CLASS lcl_app IMPLEMENTATION.
     LOOP AT SCREEN.
       IF screen-name = 'RFCDEST'.
         screen-required = '2'.
+        MODIFY SCREEN.
+        CONTINUE.
+      ENDIF.
+      " import options grey out unless "import to target" is checked
+      IF screen-group1 = 'MOP'.
+        IF toctrans = abap_true.
+          screen-input = '1'.
+        ELSE.
+          screen-input = '0'.
+        ENDIF.
         MODIFY SCREEN.
       ENDIF.
     ENDLOOP.

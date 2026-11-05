@@ -10,8 +10,10 @@ SELECTION-SCREEN BEGIN OF BLOCK b01 WITH FRAME TITLE TEXT-001.
     s_trreqi FOR gs_e070-trkorr MATCHCODE OBJECT zshcts002_zvcts002_e070
     .
 
+  PARAMETERS: p_copy RADIOBUTTON GROUP gr0 DEFAULT 'X'
+            , p_orig RADIOBUTTON GROUP gr0.
+
   PARAMETERS:   rfcdest TYPE rfcdest MATCHCODE OBJECT zshcts002_destsys
-              , toctrans TYPE char1 AS CHECKBOX DEFAULT 'X'
               , no_dis TYPE char1 DEFAULT '' NO-DISPLAY
               .
 
@@ -24,10 +26,11 @@ SELECTION-SCREEN END OF BLOCK b01.
 SELECTION-SCREEN: FUNCTION KEY 1.
 
 SELECTION-SCREEN BEGIN OF BLOCK b03 WITH FRAME TITLE t03.
-  PARAMETERS: p_impagn AS CHECKBOX DEFAULT 'X'
-            , p_orgovr AS CHECKBOX DEFAULT 'X'
-            , p_repovr AS CHECKBOX DEFAULT 'X'
-            , p_trntyp AS CHECKBOX DEFAULT ' '
-            , p_tabcls AS CHECKBOX DEFAULT ' '
-            , p_predec AS CHECKBOX DEFAULT 'X'.
+  PARAMETERS: toctrans AS CHECKBOX DEFAULT 'X' USER-COMMAND uimp
+            , p_impagn AS CHECKBOX DEFAULT 'X' MODIF ID mop
+            , p_orgovr AS CHECKBOX DEFAULT 'X' MODIF ID mop
+            , p_repovr AS CHECKBOX DEFAULT 'X' MODIF ID mop
+            , p_trntyp AS CHECKBOX DEFAULT ' ' MODIF ID mop
+            , p_tabcls AS CHECKBOX DEFAULT ' ' MODIF ID mop
+            , p_predec AS CHECKBOX DEFAULT 'X' MODIF ID mop.
 SELECTION-SCREEN END OF BLOCK b03.

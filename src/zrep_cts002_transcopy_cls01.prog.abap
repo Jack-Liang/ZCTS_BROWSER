@@ -36,6 +36,11 @@ CLASS lcl_toc DEFINITION.
       RETURNING VALUE(rv_result) TYPE string
       RAISING zcx_cts002_data_error.
 
+    METHODS send_original
+      CHANGING ct_e070 TYPE e070_t
+      RETURNING VALUE(rv_result) TYPE string
+      RAISING zcx_cts002_data_error.
+
     METHODS fill_e070
       CHANGING ct_e070 TYPE e070_t.
 
@@ -59,14 +64,17 @@ CLASS lcl_toc DEFINITION.
 
     METHODS transport_request
       IMPORTING iv_req_id TYPE trkorr
+                iv_import_mode TYPE int1 DEFAULT 2
       RETURNING VALUE(rv_result) TYPE string.
 
     METHODS transport_via_tms
       IMPORTING is_e070 TYPE e070
+                iv_import_mode TYPE int1 DEFAULT 2
       RETURNING VALUE(rv_result) TYPE string.
 
     METHODS tms_in_remote_sys
       IMPORTING is_e070 TYPE e070
+                iv_import_mode TYPE int1 DEFAULT 2
       RETURNING VALUE(rv_result) TYPE string.
 
     METHODS transfer_files
@@ -132,11 +140,21 @@ CLASS lcl_toc IMPLEMENTATION.
       fill_e070( CHANGING ct_e070 = lt_e070 ).
 
       IF lt_e070 IS NOT INITIAL.
-        rv_result = create_copy( lt_e070 ).
+        IF ms_scr->orig_mode = abap_true.
+          rv_result = send_original( CHANGING ct_e070 = lt_e070 ).
+        ELSE.
+          rv_result = create_copy( lt_e070 ).
+        ENDIF.
       ELSE.
-        RAISE EXCEPTION TYPE zcx_cts002_data_error
-          EXPORTING
-            descr = |No requests could be transported |.
+        IF ms_scr->orig_mode = abap_true.
+          RAISE EXCEPTION TYPE zcx_cts002_data_error
+            EXPORTING
+              descr = |No RELEASED requests found - original mode requires released requests (transport files only exist after release)|.
+        ELSE.
+          RAISE EXCEPTION TYPE zcx_cts002_data_error
+            EXPORTING
+              descr = |No requests could be transported |.
+        ENDIF.
       ENDIF.
 
     ENDIF.
@@ -151,14 +169,44 @@ CLASS lcl_toc IMPLEMENTATION.
 
     CLEAR ct_e070.
 
-    SELECT * FROM e070
-    INTO TABLE ct_e070
-    WHERE trkorr IN ms_scr->s_trreqi
-    AND trstatus IN
+    IF ms_scr->orig_mode = abap_true.
+      " original mode: files only exist for RELEASED requests
+      SELECT * FROM e070
+      INTO TABLE ct_e070
+      WHERE trkorr IN ms_scr->s_trreqi
+      AND trstatus = mc_trstatus-released
+      ORDER BY PRIMARY KEY
+      .
+    ELSE.
+      SELECT * FROM e070
+      INTO TABLE ct_e070
+      WHERE trkorr IN ms_scr->s_trreqi
+      AND trstatus IN
         (mc_trstatus-modifiable, mc_trstatus-protected, mc_trstatus-released)
-    ORDER BY PRIMARY KEY
-    .
+      ORDER BY PRIMARY KEY
+      .
+    ENDIF.
 
+  ENDMETHOD.
+
+  METHOD send_original.
+    " Transport the ORIGINAL released requests: push files to the
+    " target and (optionally) buffer+import. No copy request is created.
+    " toctrans checkbox: X = buffer+import (mode 2), space = buffer only (mode 3).
+    DATA ls_e070 TYPE e070.
+    DATA lv_mode TYPE int1.
+    DATA lv_res TYPE string.
+
+    lv_mode = COND int1( WHEN ms_scr->toctrans = abap_true THEN 2 ELSE 3 ).
+
+    LOOP AT ct_e070 INTO ls_e070.
+      lv_res = tms_in_remote_sys( is_e070 = ls_e070
+                                  iv_import_mode = lv_mode ).
+      IF rv_result IS NOT INITIAL.
+        rv_result = |{ rv_result }; |.
+      ENDIF.
+      rv_result = |{ rv_result }{ ls_e070-trkorr }: { lv_res }|.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD create_copy.
@@ -198,11 +246,12 @@ CLASS lcl_toc IMPLEMENTATION.
 
     release_request( lv_req_id ).
 
-    IF ms_scr->toctrans EQ abap_true.
-      rv_result = |{ lv_req_id }: { transport_request( lv_req_id ) }|.
-    ELSE.
-      rv_result = |{ lv_req_id }: released, import skipped (checkbox off)|.
-    ENDIF.
+    " transfer + buffer always; the checkbox only decides whether the
+    " import step runs (mode 2 = buffer+import, mode 3 = buffer only).
+    DATA lv_mode TYPE int1.
+    lv_mode = COND int1( WHEN ms_scr->toctrans = abap_true THEN 2 ELSE 3 ).
+    rv_result = |{ lv_req_id }: { transport_request( EXPORTING iv_req_id = lv_req_id
+                                                     iv_import_mode = lv_mode ) }|.
 
   ENDMETHOD.
 
@@ -243,28 +292,30 @@ CLASS lcl_toc IMPLEMENTATION.
 *      IMPORTING it_e070 TYPE e070_t
 *                iv_req_id TYPE trkorr.
 
-    DATA lt_e071 TYPE STANDARD TABLE OF e071.
-    DATA lt_objects TYPE STANDARD TABLE OF trexreqob.
-    DATA ls_objects TYPE trexreqob.
     DATA lv_err_msg TYPE string.
     DATA lv_err_count TYPE i.
-    FIELD-SYMBOLS <fs_e071> TYPE e071.
+    DATA lt_src TYPE STANDARD TABLE OF trkorr.
+    DATA lv_src TYPE trkorr.
 **
-    SELECT trkorr as4pos FROM e071
-      INTO CORRESPONDING FIELDS OF TABLE lt_e071
-      FOR ALL ENTRIES IN it_e070
-      WHERE trkorr EQ it_e070-trkorr
-      ORDER BY PRIMARY KEY.
+    " Source list = main requests + their subtasks. Objects created in
+    " tasks are recorded under the TASK number in E071, so copying only
+    " the main request produced an empty ToC (observed in production).
+    LOOP AT it_e070 INTO DATA(ls_src_req).
+      APPEND ls_src_req-trkorr TO lt_src.
+      SELECT trkorr FROM e070
+        APPENDING TABLE lt_src
+        WHERE strkorr = ls_src_req-trkorr.
+    ENDLOOP.
 
-    DELETE ADJACENT DUPLICATES FROM lt_e071 COMPARING trkorr.
+    SORT lt_src.
+    DELETE ADJACENT DUPLICATES FROM lt_src.
 
-
-    LOOP AT lt_e071 ASSIGNING <fs_e071>.
+    LOOP AT lt_src INTO lv_src.
 
       CALL FUNCTION 'TR_COPY_COMM'
         EXPORTING
           wi_dialog                = 'X'    " Flag, whether information messages sent
-          wi_trkorr_from           = <fs_e071>-trkorr    " Initial correction number
+          wi_trkorr_from           = lv_src    " Initial correction number
           wi_trkorr_to             = iv_req_id    " Target correction number
           wi_without_documentation = abap_false    " Flag, documentation is not to be copied
         EXCEPTIONS
@@ -410,7 +461,8 @@ CLASS lcl_toc IMPLEMENTATION.
         WHERE trkorr  = iv_req_id
           AND trstatus = mc_trstatus-released.
       IF sy-subrc EQ 0.
-        rv_result = transport_via_tms( EXPORTING is_e070 = ls_e070 ).
+        rv_result = transport_via_tms( EXPORTING is_e070 = ls_e070
+                                                 iv_import_mode = iv_import_mode ).
         RETURN.
       ENDIF.
       ADD 1 TO lv_waited.
@@ -425,7 +477,8 @@ CLASS lcl_toc IMPLEMENTATION.
   METHOD transport_via_tms.
     "       IMPORTING is_e070 TYPE e070.
 
-    rv_result = tms_in_remote_sys( is_e070 = is_e070 ).
+    rv_result = tms_in_remote_sys( is_e070 = is_e070
+                                   iv_import_mode = iv_import_mode ).
 
   ENDMETHOD.
 
@@ -434,6 +487,7 @@ CLASS lcl_toc IMPLEMENTATION.
 
     DATA lv_rfc_error TYPE string.
     DATA lv_rfc_msg TYPE c LENGTH 200.
+    DATA lv_options TYPE c LENGTH 8.
 
     "    lv_system_name = sy-sysid(3).
     lv_system_name = ms_target_sys-target_sys.
@@ -442,12 +496,19 @@ CLASS lcl_toc IMPLEMENTATION.
     " (the two trans dirs are NOT shared across the domains)
     transfer_files( is_e070 = is_e070 ).
 
+    " pack import options: again/originality/repairs/transtype/tabletype/predec
+    CONCATENATE ms_scr->imp_again ms_scr->ign_orig ms_scr->ign_repair
+                ms_scr->ign_transtype ms_scr->ign_tabletype ms_scr->ign_predec
+           INTO lv_options RESPECTING BLANKS.
+
     CALL FUNCTION 'Z_CTS002_TMS_TP_IMPORT'
       DESTINATION ms_target_sys-rfcdest
       EXPORTING
         iv_system_name = lv_system_name
         iv_request     = is_e070-trkorr
         iv_vers_ignore = vers_ign
+        iv_options     = lv_options
+        iv_import_mode = iv_import_mode
       IMPORTING
         ev_error       = lv_rfc_error
       EXCEPTIONS
@@ -461,7 +522,9 @@ CLASS lcl_toc IMPLEMENTATION.
           descr = |Import of { is_e070-trkorr } into { lv_system_name } failed: { lv_rfc_error } { lv_rfc_msg }|.
     ENDIF.
 
-    rv_result = |import to { lv_system_name } OK (tp rc<=0004)|.
+    rv_result = COND string( WHEN iv_import_mode = 3
+                             THEN |files pushed and buffered (import skipped)|
+                             ELSE |import to { lv_system_name } OK (tp rc<=0004)| ).
 
   ENDMETHOD.
 

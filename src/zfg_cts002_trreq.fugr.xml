@@ -72,6 +72,68 @@
      </DOCUMENTATION>
     </item>
     <item>
+     <FUNCNAME>Z_CTS002_FILE_UPLOAD</FUNCNAME>
+     <REMOTE_CALL>R</REMOTE_CALL>
+     <SHORT_TEXT>CTS002: receive transport file from source system</SHORT_TEXT>
+     <IMPORT>
+      <RSIMP>
+       <PARAMETER>IV_FILENAME</PARAMETER>
+       <TYP>EPSF-EPSFILNAM</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_SUBDIR</PARAMETER>
+       <TYP>EPSF-EPSSUBDIR</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IV_TOTAL_LEN</PARAMETER>
+       <TYP>I</TYP>
+      </RSIMP>
+      <RSIMP>
+       <PARAMETER>IT_DATA</PARAMETER>
+       <TYP>SOLIX_TAB</TYP>
+      </RSIMP>
+     </IMPORT>
+     <EXPORT>
+      <RSEXP>
+       <PARAMETER>EV_ERROR</PARAMETER>
+       <TYP>STRING</TYP>
+      </RSEXP>
+      <RSEXP>
+       <PARAMETER>EV_BYTES</PARAMETER>
+       <TYP>I</TYP>
+      </RSEXP>
+     </EXPORT>
+     <DOCUMENTATION>
+      <RSFDO>
+       <PARAMETER>IV_FILENAME</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>File Name</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_SUBDIR</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>EPS Subdirectory</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IV_TOTAL_LEN</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>IT_DATA</PARAMETER>
+       <KIND>P</KIND>
+       <STEXT>GBT: SOLIX as Table Type</STEXT>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_ERROR</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+      <RSFDO>
+       <PARAMETER>EV_BYTES</PARAMETER>
+       <KIND>P</KIND>
+      </RSFDO>
+     </DOCUMENTATION>
+    </item>
+    <item>
      <FUNCNAME>Z_CTS002_TMS_TP_IMPORT</FUNCNAME>
      <REMOTE_CALL>R</REMOTE_CALL>
      <SHORT_TEXT>CTS002: import transport request in target system</SHORT_TEXT>
